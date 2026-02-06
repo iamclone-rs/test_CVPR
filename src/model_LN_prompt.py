@@ -68,7 +68,7 @@ class Model(pl.LightningModule):
         neg_feat = self.forward(neg_tensor, dtype='image')
 
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
         return sk_feat, img_feat, category
 
     def validation_epoch_end(self, val_step_outputs):
@@ -99,7 +99,8 @@ class Model(pl.LightningModule):
             # we need top 100
             sorted_idx = torch.argsort(distance, descending=True)[:100]
             # count how many relevant items in top 100
-            relevant_count = torch.sum(target[sorted_idx])
+            # Ensure indices are on CPU to match target (CPU)
+            relevant_count = torch.sum(target[sorted_idx.cpu()])
             p_100[idx] = relevant_count / 100.0
         
         mAP = torch.mean(ap)
