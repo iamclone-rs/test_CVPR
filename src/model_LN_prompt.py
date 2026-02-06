@@ -83,15 +83,32 @@ class Model(pl.LightningModule):
         ## mAP category-level SBIR Metrics
         gallery = gallery_feat_all
         ap = torch.zeros(len(query_feat_all))
+        p_100 = torch.zeros(len(query_feat_all))
+
         for idx, sk_feat in enumerate(query_feat_all):
             category = all_category[idx]
             distance = -1*self.distance_fn(sk_feat.unsqueeze(0), gallery)
             target = torch.zeros(len(gallery), dtype=torch.bool)
             target[np.where(all_category == category)] = True
+            
+            # mAP@all
             ap[idx] = retrieval_average_precision(distance.cpu(), target.cpu())
+
+            # P@100
+            # distance holds scores, higher is better
+            # we need top 100
+            sorted_idx = torch.argsort(distance, descending=True)[:100]
+            # count how many relevant items in top 100
+            relevant_count = torch.sum(target[sorted_idx])
+            p_100[idx] = relevant_count / 100.0
         
         mAP = torch.mean(ap)
+        mean_p_100 = torch.mean(p_100)
+
         self.log('mAP', mAP)
+        self.log('P@100', mean_p_100)
+
         if self.global_step > 0:
             self.best_metric = self.best_metric if  (self.best_metric > mAP.item()) else mAP.item()
-        print ('mAP: {}, Best mAP: {}'.format(mAP.item(), self.best_metric))
+        
+        print ('mAP@all: {:.4f}, P@100: {:.4f}, Best mAP: {:.4f}'.format(mAP.item(), mean_p_100.item(), self.best_metric))
