@@ -106,12 +106,22 @@ class Sketchy(torch.utils.data.Dataset):
                 files.extend(glob.glob(os.path.join(path, ext)))
             return files
 
-        sk_exts = ['*.png', '*.jpg', '*.jpeg']
-        im_exts = ['*.jpg', '*.png', '*.jpeg']
+        sk_exts = ['*.png', '*.jpg', '*.jpeg', '*.svg', '*.PNG', '*.JPG', '*.JPEG', '*.SVG']
+        im_exts = ['*.jpg', '*.png', '*.jpeg', '*.JPG', '*.PNG', '*.JPEG']
 
+        valid_categories = []
         for category in self.all_categories:
-            self.all_sketches_path.extend(get_files(os.path.join(self.opts.data_dir, 'sketch', category), sk_exts))
-            self.all_photos_path[category] = get_files(os.path.join(self.opts.data_dir, 'photo', category), im_exts)
+            sk_files = get_files(os.path.join(self.opts.data_dir, 'sketch', category), sk_exts)
+            ph_files = get_files(os.path.join(self.opts.data_dir, 'photo', category), im_exts)
+            
+            if len(sk_files) > 0 and len(ph_files) > 0:
+                self.all_sketches_path.extend(sk_files)
+                self.all_photos_path[category] = ph_files
+                valid_categories.append(category)
+            else:
+                print(f"Warning: Category '{category}' dropped. Sketches: {len(sk_files)}, Photos: {len(ph_files)}")
+        
+        self.all_categories = valid_categories
 
     def __len__(self):
         return len(self.all_sketches_path)
