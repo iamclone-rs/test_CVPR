@@ -105,10 +105,10 @@ class Model(pl.LightningModule):
         mAP = torch.mean(ap)
         mean_p_100 = torch.mean(p_100)
 
-        self.log('mAP', mAP)
-        self.log('P@100', mean_p_100)
+        self.log('mAP', mAP, prog_bar=True)
+        self.log('P@100', mean_p_100, prog_bar=True)
 
         if self.global_step > 0:
             self.best_metric = self.best_metric if  (self.best_metric > mAP.item()) else mAP.item()
         
-        print ('mAP@all: {:.4f}, P@100: {:.4f}, Best mAP: {:.4f}'.format(mAP.item(), mean_p_100.item(), self.best_metric))
+        print ('\nmAP@all: {:.4f}, P@100: {:.4f}, Best mAP: {:.4f}'.format(mAP.item(), mean_p_100.item(), self.best_metric))
