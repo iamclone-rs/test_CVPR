@@ -105,6 +105,15 @@ class Model(pl.LightningModule):
         
         mAP = torch.mean(ap)
         mean_p_100 = torch.mean(p_100)
+        
+        # Calculate max possible P@100 for debugging
+        # Count how many relevant items exist for each query in the current gallery
+        relevant_totals = torch.zeros(len(query_feat_all))
+        for idx, category in enumerate(all_category):
+             relevant_totals[idx] = np.sum(all_category == category)
+        
+        avg_relevant = torch.mean(relevant_totals)
+        avg_max_p100 = torch.mean(torch.clamp(relevant_totals, max=100) / 100.0)
 
         self.log('mAP', mAP, prog_bar=True)
         self.log('P@100', mean_p_100, prog_bar=True)
@@ -112,4 +121,5 @@ class Model(pl.LightningModule):
         if self.global_step > 0:
             self.best_metric = self.best_metric if  (self.best_metric > mAP.item()) else mAP.item()
         
+        print(f'\nStats - Avg relevant items/class in val batch: {avg_relevant:.1f}. Max possible P@100: {avg_max_p100:.4f}')
         print ('\nmAP@all: {:.4f}, P@100: {:.4f}, Best mAP: {:.4f}'.format(mAP.item(), mean_p_100.item(), self.best_metric))
