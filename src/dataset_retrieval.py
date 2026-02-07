@@ -65,11 +65,12 @@ unseen_classes = {
 
 class Sketchy(torch.utils.data.Dataset):
 
-    def __init__(self, opts, transform, mode='train', used_cat=None, return_orig=False):
+    def __init__(self, opts, transform, mode='train', used_cat=None, return_orig=False, image_type='triplet'):
 
         self.opts = opts
         self.transform = transform
         self.return_orig = return_orig
+        self.image_type = image_type
 
         # Support folder structure for both Sketchy and Tuberlin if consistent
         # For Tuberlin, if structure is different, adjustments might be needed here
@@ -99,6 +100,7 @@ class Sketchy(torch.utils.data.Dataset):
 
         self.all_sketches_path = []
         self.all_photos_path = {}
+        self.all_photos_flat = []
 
         def get_files(path, extensions):
             files = []
@@ -117,6 +119,8 @@ class Sketchy(torch.utils.data.Dataset):
             if len(sk_files) > 0 and len(ph_files) > 0:
                 self.all_sketches_path.extend(sk_files)
                 self.all_photos_path[category] = ph_files
+                for ph in ph_files:
+                    self.all_photos_flat.append((ph, category))
                 valid_categories.append(category)
             else:
                 print(f"Warning: Category '{category}' dropped. Sketches: {len(sk_files)}, Photos: {len(ph_files)}")
@@ -124,9 +128,23 @@ class Sketchy(torch.utils.data.Dataset):
         self.all_categories = valid_categories
 
     def __len__(self):
+        if self.image_type == 'gallery':
+            return len(self.all_photos_flat)
         return len(self.all_sketches_path)
         
     def __getitem__(self, index):
+        if self.image_type == 'gallery':
+            filepath, category = self.all_photos_flat[index]
+            filename = os.path.basename(filepath)
+            img_data = ImageOps.pad(Image.open(filepath).convert('RGB'), size=(self.opts.max_size, self.opts.max_size))
+            img_tensor = self.transform(img_data)
+            # Returning dummy values for sketch and neg to keep signature consistent if needed, 
+            # OR better: return just what is needed and handle in collate/model.
+            # But the model expects unpacked values.
+            # Model validation_step expects: sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+            # If we change return signature, we must handle it in validation_step.
+            return (torch.zeros_like(img_tensor), img_tensor, torch.zeros_like(img_tensor), category, filename)
+
         filepath = self.all_sketches_path[index]                
         category = filepath.split(os.path.sep)[-2]
         filename = os.path.basename(filepath)

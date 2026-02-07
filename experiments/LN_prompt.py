@@ -14,10 +14,14 @@ if __name__ == '__main__':
     dataset_transforms = Sketchy.data_transform(opts)
 
     train_dataset = Sketchy(opts, dataset_transforms, mode='train', return_orig=False)
-    val_dataset = Sketchy(opts, dataset_transforms, mode='val', used_cat=train_dataset.all_categories, return_orig=False)
+    val_dataset_query = Sketchy(opts, dataset_transforms, mode='val', used_cat=train_dataset.all_categories, return_orig=False, image_type='triplet')
+    val_dataset_gallery = Sketchy(opts, dataset_transforms, mode='val', used_cat=train_dataset.all_categories, return_orig=False, image_type='gallery')
 
     train_loader = DataLoader(dataset=train_dataset, batch_size=opts.batch_size, num_workers=opts.workers)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=opts.batch_size, num_workers=opts.workers)
+    val_loader_query = DataLoader(dataset=val_dataset_query, batch_size=opts.batch_size, num_workers=opts.workers)
+    val_loader_gallery = DataLoader(dataset=val_dataset_gallery, batch_size=opts.batch_size, num_workers=opts.workers)
+    
+    val_loader = [val_loader_query, val_loader_gallery]
 
     logger = TensorBoardLogger('tb_logs', name=opts.exp_name)
 

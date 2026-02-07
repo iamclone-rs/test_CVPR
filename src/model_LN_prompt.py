@@ -61,23 +61,38 @@ class Model(pl.LightningModule):
         self.log('train_loss', loss)
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         sk_tensor, img_tensor, neg_tensor, category = batch[:4]
-        img_feat = self.forward(img_tensor, dtype='image')
-        sk_feat = self.forward(sk_tensor, dtype='sketch')
-        neg_feat = self.forward(neg_tensor, dtype='image')
+        
+        if dataloader_idx == 0:
+            img_feat = self.forward(img_tensor, dtype='image')
+            sk_feat = self.forward(sk_tensor, dtype='sketch')
+            neg_feat = self.forward(neg_tensor, dtype='image')
 
-        loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
-        return sk_feat, img_feat, category
+            loss = self.loss_fn(sk_feat, img_feat, neg_feat)
+            self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+            return {'type': 'query', 'sk_feat': sk_feat, 'category': category}
+        else:
+            img_feat = self.forward(img_tensor, dtype='image')
+            return {'type': 'gallery', 'img_feat': img_feat, 'category': category}
 
     def validation_epoch_end(self, val_step_outputs):
-        Len = len(val_step_outputs)
-        if Len == 0:
+        # PTL returns list of lists when multiple val_dataloaders are used
+        if not isinstance(val_step_outputs, list) or len(val_step_outputs) < 2:
+            print("Warning: Expected multiple val dataloaders for query/gallery split")
             return
-        query_feat_all = torch.cat([val_step_outputs[i][0] for i in range(Len)])
-        gallery_feat_all = torch.cat([val_step_outputs[i][1] for i in range(Len)])
-        all_category = np.array(sum([list(val_step_outputs[i][2]) for i in range(Len)], []))
+            
+        queries_out = val_step_outputs[0]
+        gallery_out = val_step_outputs[1]
+
+        if len(queries_out) == 0 or len(gallery_out) == 0:
+            return
+
+        query_feat_all = torch.cat([x['sk_feat'] for x in queries_out])
+        query_cat_all = np.array(sum([list(x['category']) for x in queries_out], []))
+        
+        gallery_feat_all = torch.cat([x['img_feat'] for x in gallery_out])
+        gallery_cat_all = np.array(sum([list(x['category']) for x in gallery_out], []))
 
 
         ## mAP category-level SBIR Metrics
@@ -86,10 +101,10 @@ class Model(pl.LightningModule):
         p_100 = torch.zeros(len(query_feat_all))
 
         for idx, sk_feat in enumerate(query_feat_all):
-            category = all_category[idx]
+            category = query_cat_all[idx]
             distance = -1*self.distance_fn(sk_feat.unsqueeze(0), gallery)
             target = torch.zeros(len(gallery), dtype=torch.bool)
-            target[np.where(all_category == category)] = True
+            target[np.where(gallery_cat_all == category)] = True
             
             # mAP@all
             ap[idx] = retrieval_average_precision(distance.cpu(), target.cpu())
@@ -109,8 +124,8 @@ class Model(pl.LightningModule):
         # Calculate max possible P@100 for debugging
         # Count how many relevant items exist for each query in the current gallery
         relevant_totals = torch.zeros(len(query_feat_all))
-        for idx, category in enumerate(all_category):
-             relevant_totals[idx] = np.sum(all_category == category)
+        for idx, category in enumerate(query_cat_all):
+             relevant_totals[idx] = np.sum(gallery_cat_all == category)
         
         avg_relevant = torch.mean(relevant_totals)
         avg_max_p100 = torch.mean(torch.clamp(relevant_totals, max=100) / 100.0)
