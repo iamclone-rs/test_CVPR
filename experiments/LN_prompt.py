@@ -1,11 +1,8 @@
 import os
-import glob
 import sys
-import inspect
 from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
-from torchvision import transforms
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -18,27 +15,6 @@ from src.model_LN_prompt import Model
 from src.dataset_retrieval import Sketchy
 from experiments.options import opts
 
-LEGACY_HOOKS = ("training_epoch_end", "validation_epoch_end", "test_epoch_end")
-
-
-def resolve_model_class():
-    legacy_hooks = [hook for hook in LEGACY_HOOKS if callable(getattr(Model, hook, None))]
-    model_source = inspect.getsourcefile(Model) or "<unknown>"
-    print(f"Model import resolved to: {model_source}")
-    print(f"Legacy Lightning hooks detected: {legacy_hooks if legacy_hooks else 'none'}")
-
-    if not legacy_hooks:
-        return Model
-
-    class PatchedModel(Model):
-        training_epoch_end = None
-        validation_epoch_end = None
-        test_epoch_end = None
-
-    print("Using PatchedModel to mask removed Lightning v2 epoch_end hooks.")
-    return PatchedModel
-
-
 if __name__ == '__main__':
     torch.set_float32_matmul_precision('high')
     dataset_transforms = Sketchy.data_transform(opts)
@@ -47,9 +23,27 @@ if __name__ == '__main__':
     val_dataset_query = Sketchy(opts, dataset_transforms, mode='val', used_cat=train_dataset.all_categories, return_orig=False, image_type='triplet')
     val_dataset_gallery = Sketchy(opts, dataset_transforms, mode='val', used_cat=train_dataset.all_categories, return_orig=False, image_type='gallery')
 
-    train_loader = DataLoader(dataset=train_dataset, batch_size=opts.batch_size, num_workers=opts.workers)
-    val_loader_query = DataLoader(dataset=val_dataset_query, batch_size=opts.batch_size, num_workers=opts.workers)
-    val_loader_gallery = DataLoader(dataset=val_dataset_gallery, batch_size=opts.batch_size, num_workers=opts.workers)
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=opts.batch_size,
+        num_workers=opts.workers,
+        shuffle=True,
+        pin_memory=True,
+        persistent_workers=opts.workers > 0)
+    val_loader_query = DataLoader(
+        dataset=val_dataset_query,
+        batch_size=opts.batch_size,
+        num_workers=opts.workers,
+        shuffle=False,
+        pin_memory=True,
+        persistent_workers=opts.workers > 0)
+    val_loader_gallery = DataLoader(
+        dataset=val_dataset_gallery,
+        batch_size=opts.batch_size,
+        num_workers=opts.workers,
+        shuffle=False,
+        pin_memory=True,
+        persistent_workers=opts.workers > 0)
     
     val_loader = [val_loader_query, val_loader_gallery]
 
@@ -68,8 +62,8 @@ if __name__ == '__main__':
     else:
         print ('resuming training from %s'%ckpt_path)
 
-    trainer = Trainer(accelerator='gpu', devices=-1,
-        min_epochs=1, max_epochs=2000,
+    trainer = Trainer(accelerator='gpu', devices=1,
+        min_epochs=1, max_epochs=opts.epochs,
         benchmark=True,
         logger=logger,
         enable_progress_bar=False,
@@ -82,10 +76,10 @@ if __name__ == '__main__':
     )
 
     if ckpt_path is None:
-        model = resolve_model_class()()
+        model = Model(train_dataset.all_categories)
     else:
         print ('resuming training from %s'%ckpt_path)
-        model = resolve_model_class()()
+        model = Model(train_dataset.all_categories)
 
     print ('beginning training...good luck...')
     trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)

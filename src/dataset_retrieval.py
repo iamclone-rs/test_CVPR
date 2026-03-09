@@ -5,6 +5,12 @@ import torch
 from torchvision import transforms
 from PIL import Image, ImageOps
 
+try:
+    from torchvision.transforms import InterpolationMode
+    BICUBIC = InterpolationMode.BICUBIC
+except ImportError:
+    BICUBIC = Image.BICUBIC
+
 unseen_classes = {
     'Sketchy': [
         "bat",
@@ -173,23 +179,24 @@ class Sketchy(torch.utils.data.Dataset):
     @staticmethod
     def data_transform(opts):
         dataset_transforms = transforms.Compose([
-            transforms.Resize((opts.max_size, opts.max_size)),
+            transforms.Resize((opts.max_size, opts.max_size), interpolation=BICUBIC),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            transforms.Normalize(
+                mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711])
         ])
         return dataset_transforms
 
 
 if __name__ == '__main__':
     from experiments.options import opts
-    import tqdm
 
     dataset_transforms = Sketchy.data_transform(opts)
     dataset_train = Sketchy(opts, dataset_transforms, mode='train', return_orig=True)
     dataset_val = Sketchy(opts, dataset_transforms, mode='val', used_cat=dataset_train.all_categories, return_orig=True)
 
     idx = 0
-    for data in tqdm.tqdm(dataset_val):
+    for data in dataset_val:
         continue
         (sk_tensor, img_tensor, neg_tensor, filename,
             sk_data, img_data, neg_data) = data

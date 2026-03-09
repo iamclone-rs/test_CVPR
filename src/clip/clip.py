@@ -3,12 +3,11 @@ import os
 import urllib
 import warnings
 from typing import Any, Union, List
-from pkg_resources import packaging
+from packaging import version
 
 import torch
 from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
-from tqdm import tqdm
 
 from .model import build_model
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer
@@ -20,7 +19,7 @@ except ImportError:
     BICUBIC = Image.BICUBIC
 
 
-if packaging.version.parse(torch.__version__) < packaging.version.parse("1.7.1"):
+if version.parse(torch.__version__) < version.parse("1.7.1"):
     warnings.warn("PyTorch version 1.7.1 or higher is recommended")
 
 
@@ -57,14 +56,11 @@ def _download(url: str, root: str):
             warnings.warn(f"{download_target} exists, but the SHA256 checksum does not match; re-downloading the file")
 
     with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
-        with tqdm(total=int(source.info().get("Content-Length")), ncols=80, unit='iB', unit_scale=True, unit_divisor=1024) as loop:
-            while True:
-                buffer = source.read(8192)
-                if not buffer:
-                    break
-
-                output.write(buffer)
-                loop.update(len(buffer))
+        while True:
+            buffer = source.read(8192)
+            if not buffer:
+                break
+            output.write(buffer)
 
     if hashlib.sha256(open(download_target, "rb").read()).hexdigest() != expected_sha256:
         raise RuntimeError("Model has been downloaded but the SHA256 checksum does not not match")
@@ -220,7 +216,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, truncate: b
     sot_token = _tokenizer.encoder["<|startoftext|>"]
     eot_token = _tokenizer.encoder["<|endoftext|>"]
     all_tokens = [[sot_token] + _tokenizer.encode(text) + [eot_token] for text in texts]
-    if packaging.version.parse(torch.__version__) < packaging.version.parse("1.8.0"):
+    if version.parse(torch.__version__) < version.parse("1.8.0"):
         result = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
     else:
         result = torch.zeros(len(all_tokens), context_length, dtype=torch.int)
