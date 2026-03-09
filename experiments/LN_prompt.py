@@ -1,7 +1,9 @@
 import os
 import glob
 import sys
+import inspect
 from pathlib import Path
+import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from pytorch_lightning import Trainer
@@ -16,7 +18,29 @@ from src.model_LN_prompt import Model
 from src.dataset_retrieval import Sketchy
 from experiments.options import opts
 
+LEGACY_HOOKS = ("training_epoch_end", "validation_epoch_end", "test_epoch_end")
+
+
+def resolve_model_class():
+    legacy_hooks = [hook for hook in LEGACY_HOOKS if callable(getattr(Model, hook, None))]
+    model_source = inspect.getsourcefile(Model) or "<unknown>"
+    print(f"Model import resolved to: {model_source}")
+    print(f"Legacy Lightning hooks detected: {legacy_hooks if legacy_hooks else 'none'}")
+
+    if not legacy_hooks:
+        return Model
+
+    class PatchedModel(Model):
+        training_epoch_end = None
+        validation_epoch_end = None
+        test_epoch_end = None
+
+    print("Using PatchedModel to mask removed Lightning v2 epoch_end hooks.")
+    return PatchedModel
+
+
 if __name__ == '__main__':
+    torch.set_float32_matmul_precision('high')
     dataset_transforms = Sketchy.data_transform(opts)
 
     train_dataset = Sketchy(opts, dataset_transforms, mode='train', return_orig=False)
@@ -48,6 +72,9 @@ if __name__ == '__main__':
         min_epochs=1, max_epochs=2000,
         benchmark=True,
         logger=logger,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
         # val_check_interval=10, 
         # accumulate_grad_batches=1,
         check_val_every_n_epoch=1,
@@ -55,10 +82,10 @@ if __name__ == '__main__':
     )
 
     if ckpt_path is None:
-        model = Model()
+        model = resolve_model_class()()
     else:
         print ('resuming training from %s'%ckpt_path)
-        model = Model()
+        model = resolve_model_class()()
 
     print ('beginning training...good luck...')
     trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)

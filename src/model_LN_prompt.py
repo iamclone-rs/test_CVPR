@@ -2,8 +2,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchmetrics.functional import retrieval_average_precision
 import pytorch_lightning as pl
+
+try:
+    from torchmetrics.retrieval import retrieval_average_precision
+except ImportError:
+    from torchmetrics.functional import retrieval_average_precision
 
 from src.clip import clip
 from experiments.options import opts
@@ -43,6 +47,11 @@ class Model(pl.LightningModule):
         self.val_gallery_features = []
         self.val_gallery_categories = []
 
+    def retrieval_score(self, query_feat, gallery_feat):
+        # Shift cosine similarity into the positive range because the
+        # torchmetrics AP implementation masks targets where preds <= 0.
+        return 1.0 + F.cosine_similarity(query_feat, gallery_feat)
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam([
             {'params': self.clip.parameters(), 'lr': self.opts.clip_LN_lr},
@@ -65,7 +74,7 @@ class Model(pl.LightningModule):
         neg_feat = self.forward(neg_tensor, dtype='image')
 
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, batch_size=sk_tensor.size(0))
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
@@ -77,7 +86,7 @@ class Model(pl.LightningModule):
             neg_feat = self.forward(neg_tensor, dtype='image')
 
             loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-            self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+            self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=sk_tensor.size(0))
             self.val_query_features.append(sk_feat.detach().cpu())
             self.val_query_categories.extend(category)
         else:
@@ -107,17 +116,15 @@ class Model(pl.LightningModule):
 
         for idx, sk_feat in enumerate(query_feat_all):
             category = query_cat_all[idx]
-            distance = -1*self.distance_fn(sk_feat.unsqueeze(0), gallery)
+            scores = self.retrieval_score(sk_feat.unsqueeze(0), gallery)
             target = torch.zeros(len(gallery), dtype=torch.bool)
             target[np.where(gallery_cat_all == category)] = True
             
             # mAP@all
-            ap[idx] = retrieval_average_precision(distance.cpu(), target.cpu())
+            ap[idx] = retrieval_average_precision(scores.cpu(), target.cpu())
 
             # P@100
-            # distance holds scores, higher is better
-            # we need top 100
-            sorted_idx = torch.argsort(distance, descending=True)[:100]
+            sorted_idx = torch.argsort(scores, descending=True)[:100]
             # count how many relevant items in top 100
             # Ensure indices are on CPU to match target (CPU)
             relevant_count = torch.sum(target[sorted_idx.cpu()])
