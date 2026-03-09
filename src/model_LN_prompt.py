@@ -35,6 +35,13 @@ class Model(pl.LightningModule):
             distance_function=self.distance_fn, margin=0.2)
 
         self.best_metric = -1e3
+        self._reset_validation_buffers()
+
+    def _reset_validation_buffers(self):
+        self.val_query_features = []
+        self.val_query_categories = []
+        self.val_gallery_features = []
+        self.val_gallery_categories = []
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam([
@@ -71,28 +78,26 @@ class Model(pl.LightningModule):
 
             loss = self.loss_fn(sk_feat, img_feat, neg_feat)
             self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
-            return {'type': 'query', 'sk_feat': sk_feat, 'category': category}
+            self.val_query_features.append(sk_feat.detach().cpu())
+            self.val_query_categories.extend(category)
         else:
             img_feat = self.forward(img_tensor, dtype='image')
-            return {'type': 'gallery', 'img_feat': img_feat, 'category': category}
+            self.val_gallery_features.append(img_feat.detach().cpu())
+            self.val_gallery_categories.extend(category)
 
-    def validation_epoch_end(self, val_step_outputs):
-        # PTL returns list of lists when multiple val_dataloaders are used
-        if not isinstance(val_step_outputs, list) or len(val_step_outputs) < 2:
+    def on_validation_epoch_start(self):
+        self._reset_validation_buffers()
+
+    def on_validation_epoch_end(self):
+        if not self.val_query_features or not self.val_gallery_features:
             print("Warning: Expected multiple val dataloaders for query/gallery split")
             return
-            
-        queries_out = val_step_outputs[0]
-        gallery_out = val_step_outputs[1]
 
-        if len(queries_out) == 0 or len(gallery_out) == 0:
-            return
-
-        query_feat_all = torch.cat([x['sk_feat'] for x in queries_out])
-        query_cat_all = np.array(sum([list(x['category']) for x in queries_out], []))
+        query_feat_all = torch.cat(self.val_query_features)
+        query_cat_all = np.array(self.val_query_categories)
         
-        gallery_feat_all = torch.cat([x['img_feat'] for x in gallery_out])
-        gallery_cat_all = np.array(sum([list(x['category']) for x in gallery_out], []))
+        gallery_feat_all = torch.cat(self.val_gallery_features)
+        gallery_cat_all = np.array(self.val_gallery_categories)
 
 
         ## mAP category-level SBIR Metrics
@@ -138,3 +143,4 @@ class Model(pl.LightningModule):
         
         print(f'\nStats - Avg relevant items/class in val batch: {avg_relevant:.1f}. Max possible P@100: {avg_max_p100:.4f}')
         print ('\nmAP@all: {:.4f}, P@100: {:.4f}, Best mAP: {:.4f}'.format(mAP.item(), mean_p_100.item(), self.best_metric))
+        self._reset_validation_buffers()
