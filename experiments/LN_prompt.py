@@ -1,10 +1,16 @@
 import os
 import glob
+import sys
+from pathlib import Path
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.model_LN_prompt import Model
 from src.dataset_retrieval import Sketchy
